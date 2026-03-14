@@ -1,11 +1,74 @@
+import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Car, ArrowLeft, ArrowRight, MoveUp, Download } from 'lucide-react';
+import { Car, ArrowLeft, ArrowRight, MoveUp, Download, Loader2, AlertCircle, ArrowLeftIcon } from 'lucide-react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { MovementPieChart, TrafficFlowChart, VehiclesOverTimeChart } from '@/components/dashboard/TrafficCharts';
-import { trafficStats } from '@/data/mockData';
+import { useVideoAnalysis, useVideoDetail } from '@/hooks/useApi';
 import { Button } from '@/components/ui/button';
 
 export default function Results() {
+  const { videoId } = useParams<{ videoId: string }>();
+  const { data: analysis, isLoading: loadingAnalysis, error: analysisError } = useVideoAnalysis(videoId ?? null);
+  const { data: video, isLoading: loadingVideo } = useVideoDetail(videoId ?? null);
+
+  const isLoading = loadingAnalysis || loadingVideo;
+
+  if (!videoId) {
+    return (
+      <div className="min-h-screen pt-20 flex items-center justify-center">
+        <div className="glass-card p-8 text-center">
+          <p className="text-lg font-semibold mb-2">No video selected</p>
+          <p className="text-sm text-muted-foreground mb-4">Upload a video first to see results.</p>
+          <Button asChild><Link to="/upload">Upload Video</Link></Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen pt-20 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Loading analysis results...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (analysisError || !analysis) {
+    return (
+      <div className="min-h-screen pt-20 flex items-center justify-center">
+        <div className="glass-card p-8 text-center max-w-md">
+          <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-3" />
+          <p className="text-lg font-semibold mb-2">Analysis not available</p>
+          <p className="text-sm text-muted-foreground mb-4">
+            {video?.status === 'processing'
+              ? 'Video is still being processed. Check back shortly.'
+              : video?.status === 'failed'
+              ? `Processing failed: ${video.error_message || 'Unknown error'}`
+              : 'No analysis found for this video.'}
+          </p>
+          <div className="flex gap-3 justify-center">
+            <Button variant="outline" asChild><Link to="/dashboard">Dashboard</Link></Button>
+            <Button asChild className="bg-primary hover:bg-primary/90"><Link to="/upload">Upload New</Link></Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Build chart data from analysis
+  const movementData = [
+    { name: 'Straight', value: analysis.straight_movements, fill: 'hsl(230, 89%, 67%)' },
+    { name: 'Left Turn', value: analysis.left_turns, fill: 'hsl(160, 84%, 39%)' },
+    { name: 'Right Turn', value: analysis.right_turns, fill: 'hsl(24, 94%, 50%)' },
+  ];
+
+  // Use detailed_metrics for time series if available
+  const timeSeriesData = analysis.detailed_metrics?.time_series ?? [];
+  const densityData = analysis.detailed_metrics?.density ?? [];
+
   return (
     <div className="min-h-screen pt-20 pb-12 px-4 sm:px-6">
       <div className="max-w-7xl mx-auto">
@@ -15,82 +78,60 @@ export default function Results() {
           className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4"
         >
           <div>
-            <h1 className="text-3xl font-bold tracking-tight mb-1">Analysis Results</h1>
-            <p className="text-muted-foreground text-sm">Video ID: mock-video-001 · Processed in {trafficStats.processingTime}</p>
+            <div className="flex items-center gap-2 mb-2">
+              <Button variant="ghost" size="sm" asChild className="p-1">
+                <Link to="/dashboard"><ArrowLeftIcon className="w-4 h-4" /></Link>
+              </Button>
+              <h1 className="text-3xl font-bold tracking-tight">Analysis Results</h1>
+            </div>
+            <p className="text-muted-foreground text-sm">
+              {video?.original_filename ?? videoId}
+              {analysis.processing_time ? ` · Processed in ${analysis.processing_time.toFixed(1)}s` : ''}
+            </p>
           </div>
           <Button variant="outline" className="gap-2">
             <Download className="w-4 h-4" /> Export Data
           </Button>
         </motion.div>
 
-        {/* Processed Video */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="glass-card overflow-hidden mb-8"
-        >
-          <div className="aspect-video bg-card flex items-center justify-center relative">
-            <div className="absolute inset-0 grid grid-cols-4 grid-rows-3 opacity-10">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <div key={i} className="border border-muted-foreground/20" />
-              ))}
-            </div>
-            {/* Bounding boxes simulation */}
-            <motion.div
-              animate={{ x: [-200, 200] }}
-              transition={{ duration: 5, repeat: Infinity, ease: 'linear' }}
-              className="absolute top-[40%]"
-            >
-              <div className="w-14 h-10 border-2 border-primary rounded relative">
-                <span className="absolute -top-5 left-0 text-[9px] font-mono bg-primary/20 text-primary px-1 rounded">ID-07 Car</span>
-              </div>
-            </motion.div>
-            <motion.div
-              animate={{ y: [200, -200] }}
-              transition={{ duration: 6, repeat: Infinity, ease: 'linear', delay: 1.5 }}
-              className="absolute left-[45%]"
-            >
-              <div className="w-10 h-14 border-2 border-emerald rounded relative">
-                <span className="absolute -top-5 left-0 text-[9px] font-mono bg-emerald/20 text-emerald px-1 rounded">ID-12 Truck</span>
-              </div>
-            </motion.div>
-            <motion.div
-              animate={{ x: [250, -250] }}
-              transition={{ duration: 4.5, repeat: Infinity, ease: 'linear', delay: 0.5 }}
-              className="absolute top-[60%]"
-            >
-              <div className="w-12 h-8 border-2 border-orange rounded relative">
-                <span className="absolute -top-5 left-0 text-[9px] font-mono bg-orange/20 text-orange px-1 rounded">ID-23 Car</span>
-              </div>
-            </motion.div>
-
-            <div className="absolute top-4 left-4 flex gap-2 z-10">
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-primary/20 text-primary border border-primary/20">Processed</span>
-            </div>
-            <span className="text-muted-foreground/30 text-sm z-10">Processed Video with Bounding Boxes</span>
-          </div>
-        </motion.div>
+        {/* Annotated video */}
+        {analysis.annotated_video_path && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card overflow-hidden mb-8">
+            <video
+              src={`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/processed/${analysis.annotated_video_path}`}
+              controls
+              className="w-full aspect-video bg-card"
+            />
+          </motion.div>
+        )}
 
         {/* Summary Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard label="Total Vehicles" value={124} icon={Car} trend="+8%" color="primary" delay={0} />
-          <StatCard label="Left Turns" value={36} icon={ArrowLeft} color="emerald" delay={1} />
-          <StatCard label="Right Turns" value={28} icon={ArrowRight} color="orange" delay={2} />
-          <StatCard label="Straight" value={60} icon={MoveUp} color="primary" delay={3} />
+          <StatCard label="Total Vehicles" value={analysis.total_vehicles} icon={Car} color="primary" delay={0} />
+          <StatCard label="Left Turns" value={analysis.left_turns} icon={ArrowLeft} color="emerald" delay={1} />
+          <StatCard label="Right Turns" value={analysis.right_turns} icon={ArrowRight} color="orange" delay={2} />
+          <StatCard label="Straight" value={analysis.straight_movements} icon={MoveUp} color="primary" delay={3} />
+        </div>
+
+        {/* Vehicle type breakdown */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <StatCard label="Cars" value={analysis.cars} icon={Car} color="primary" delay={4} />
+          <StatCard label="Trucks" value={analysis.trucks} icon={Car} color="orange" delay={5} />
+          <StatCard label="Buses" value={analysis.buses} icon={Car} color="emerald" delay={6} />
+          <StatCard label="Motorcycles" value={analysis.motorcycles} icon={Car} color="orange" delay={7} />
         </div>
 
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-8">
           <div className="lg:col-span-4">
-            <MovementPieChart />
+            <MovementPieChart data={movementData} />
           </div>
           <div className="lg:col-span-8">
-            <TrafficFlowChart />
+            <TrafficFlowChart data={timeSeriesData} />
           </div>
         </div>
 
-        <VehiclesOverTimeChart />
+        <VehiclesOverTimeChart data={timeSeriesData} />
       </div>
     </div>
   );

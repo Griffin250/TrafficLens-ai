@@ -27,6 +27,7 @@ const App = () => (
           <Route path="/" element={<Landing />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/upload" element={<UploadPage />} />
+          <Route path="/results/:videoId" element={<Results />} />
           <Route path="/results" element={<Results />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="/settings" element={<SettingsPage />} />
