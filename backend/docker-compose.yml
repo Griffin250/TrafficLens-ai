@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: trafficlens_postgres
+    environment:
+      POSTGRES_DB: trafficlens
+      POSTGRES_USER: traffic_user
+      POSTGRES_PASSWORD: traffic_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traffic_user -d trafficlens"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: trafficlens_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  backend:
+    build: .
+    container_name: trafficlens_backend
+    environment:
+      DATABASE_URL: postgresql://traffic_user:traffic_password@postgres:5432/trafficlens
+      REDIS_URL: redis://redis:6379
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      DEBUG: "False"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+      - ./processed:/app/processed
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Celery Worker
+  celery:
+    build: .
+    container_name: trafficlens_celery
+    environment:
+      DATABASE_URL: postgresql://traffic_user:traffic_password@postgres:5432/trafficlens
+      REDIS_URL: redis://redis:6379
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+      - ./processed:/app/processed
+    command: celery -A tasks worker --loglevel=info
+
+  # Celery Beat (Optional - for scheduled tasks)
+  celery-beat:
+    build: .
+    container_name: trafficlens_celery_beat
+    environment:
+      DATABASE_URL: postgresql://traffic_user:traffic_password@postgres:5432/trafficlens
+      REDIS_URL: redis://redis:6379
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A tasks beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: trafficlens_network
