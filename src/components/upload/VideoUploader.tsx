@@ -1,14 +1,33 @@
 import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, FileVideo, X, CheckCircle2, Loader2 } from 'lucide-react';
+import { Upload, FileVideo, X, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
+import { useProcessingJob } from '@/hooks/useApi';
+import { videosApi } from '@/services/api';
 import { Button } from '@/components/ui/button';
 
 export function VideoUploader() {
+  const navigate = useNavigate();
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const { uploadProgress, setUploadProgress, isProcessing, setIsProcessing, setCurrentVideoId } = useAppStore();
+  const [error, setError] = useState<string | null>(null);
+  const { uploadProgress, setUploadProgress, isProcessing, setIsProcessing, currentVideoId, setCurrentVideoId } = useAppStore();
   const [uploaded, setUploaded] = useState(false);
+
+  // Poll processing job status after upload
+  const { data: job } = useProcessingJob(currentVideoId, isProcessing);
+
+  // When job completes, update UI
+  if (job && isProcessing) {
+    if (job.status === 'completed') {
+      setIsProcessing(false);
+      setUploaded(true);
+    } else if (job.status === 'failed') {
+      setIsProcessing(false);
+      setError(job.error_message || 'Processing failed');
+    }
+  }
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -23,6 +42,7 @@ export function VideoUploader() {
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile && isVideoFile(droppedFile)) {
       setFile(droppedFile);
+      setError(null);
     }
   }, []);
 
@@ -30,29 +50,34 @@ export function VideoUploader() {
     const selectedFile = e.target.files?.[0];
     if (selectedFile && isVideoFile(selectedFile)) {
       setFile(selectedFile);
+      setError(null);
     }
   };
 
-  const isVideoFile = (f: File) => ['video/mp4', 'video/quicktime', 'video/x-msvideo'].includes(f.type);
+  const isVideoFile = (f: File) =>
+    ['video/mp4', 'video/quicktime', 'video/x-msvideo'].includes(f.type);
 
-  const simulateUpload = () => {
+  const handleUpload = async () => {
+    if (!file) return;
     setIsProcessing(true);
     setUploadProgress(0);
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 15;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-        setUploadProgress(100);
-        setTimeout(() => {
-          setIsProcessing(false);
-          setUploaded(true);
-          setCurrentVideoId('mock-video-001');
-        }, 1000);
-      }
-      setUploadProgress(Math.min(progress, 100));
-    }, 300);
+    setError(null);
+
+    try {
+      const response = await videosApi.upload(file, (pct) => {
+        setUploadProgress(pct);
+      });
+
+      const { id } = response.data;
+      setCurrentVideoId(id);
+      setUploadProgress(100);
+      // Now polling takes over via useProcessingJob
+    } catch (err: any) {
+      setIsProcessing(false);
+      const message =
+        err.response?.data?.detail || err.message || 'Upload failed';
+      setError(message);
+    }
   };
 
   const resetUpload = () => {
@@ -61,7 +86,10 @@ export function VideoUploader() {
     setUploadProgress(0);
     setIsProcessing(false);
     setCurrentVideoId(null);
+    setError(null);
   };
+
+  const processingProgress = job?.progress ?? (uploadProgress < 100 ? uploadProgress : 0);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -125,22 +153,31 @@ export function VideoUploader() {
               )}
             </div>
 
+            {error && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm mb-4">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
             {isProcessing ? (
               <div className="space-y-4">
                 <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
                   <motion.div
                     className="h-full rounded-full bg-primary"
                     initial={{ width: 0 }}
-                    animate={{ width: `${uploadProgress}%` }}
+                    animate={{ width: `${uploadProgress < 100 ? uploadProgress : processingProgress}%` }}
                     transition={{ duration: 0.3 }}
                   />
                 </div>
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span className="flex items-center gap-1.5">
                     <Loader2 className="w-3 h-3 animate-spin" />
-                    {uploadProgress < 100 ? 'Uploading...' : 'Processing with AI...'}
+                    {uploadProgress < 100
+                      ? 'Uploading to server...'
+                      : `AI Processing... ${processingProgress}%`}
                   </span>
-                  <span>{Math.round(uploadProgress)}%</span>
+                  <span>{uploadProgress < 100 ? `${Math.round(uploadProgress)}%` : `${processingProgress}%`}</span>
                 </div>
                 {uploadProgress >= 100 && (
                   <div className="relative h-1 rounded-full overflow-hidden bg-muted mt-2">
@@ -149,7 +186,7 @@ export function VideoUploader() {
                 )}
               </div>
             ) : (
-              <Button onClick={simulateUpload} className="w-full bg-primary hover:bg-primary/90">
+              <Button onClick={handleUpload} className="w-full bg-primary hover:bg-primary/90">
                 Start Analysis
               </Button>
             )}
@@ -165,11 +202,19 @@ export function VideoUploader() {
               <CheckCircle2 className="w-8 h-8 text-emerald" />
             </div>
             <p className="text-lg font-semibold mb-1">Analysis Complete</p>
-            <p className="text-sm text-muted-foreground mb-6">4.2GB processed in 12.4s</p>
+            <p className="text-sm text-muted-foreground mb-6">
+              {(file.size / (1024 * 1024)).toFixed(1)} MB processed
+              {job?.completed_at && job?.started_at
+                ? ` in ${((new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()) / 1000).toFixed(1)}s`
+                : ''}
+            </p>
             <div className="flex gap-3 justify-center">
               <Button variant="outline" onClick={resetUpload}>Upload Another</Button>
-              <Button className="bg-primary hover:bg-primary/90" asChild>
-                <a href="/results">View Results</a>
+              <Button
+                className="bg-primary hover:bg-primary/90"
+                onClick={() => navigate(`/results/${currentVideoId}`)}
+              >
+                View Results
               </Button>
             </div>
           </motion.div>
