@@ -57,9 +57,11 @@ class VehicleDetector:
         # Mock detection for development without GPU
         if self.model is None:
             # Return mock detections for testing
+            logger.debug(f"[DETECTOR] Using mock detections (model not loaded)")
             return self._get_mock_detections(frame)
         
         try:
+            logger.debug(f"[DETECTOR] Running YOLO model...")
             results = self.model(frame, conf=self.confidence_threshold, device=self.device)
             
             for result in results:
@@ -78,8 +80,10 @@ class VehicleDetector:
                             "class": class_name.lower(),
                             "class_id": class_id
                         })
+            
+            logger.debug(f"[DETECTOR] Found {len(detections)} vehicles")
         except Exception as e:
-            logger.error(f"Detection error: {e}")
+            logger.error(f"[DETECTOR] Detection error: {e}")
             return self._get_mock_detections(frame)
         
         return detections
@@ -279,18 +283,20 @@ class TrafficAnalyzer:
 class VideoProcessor:
     """Main video processing pipeline"""
     
-    def __init__(self, video_path: str, video_id: str, task=None):
+    def __init__(self, video_path: str, video_id: str, task=None, db=None):
         """
         Initialize processor
         
         Args:
             video_path: Path to input video
             video_id: Video ID for database
-            task: Celery task for progress updates
+            task: Celery task for progress updates (deprecated, use db instead)
+            db: Database session for updating progress
         """
         self.video_path = video_path
         self.video_id = video_id
         self.task = task
+        self.db = db
         self.detector = VehicleDetector()
         self.tracker = SimpleTracker()
         self.analyzer = TrafficAnalyzer()
@@ -302,46 +308,78 @@ class VideoProcessor:
         Returns:
             Dictionary with analysis results
         """
-        logger.info(f"Processing video: {self.video_path}")
+        import time
+        from config import get_settings
+        
+        settings = get_settings()
+        start_time = time.time()
+        
+        # Determine frame skip rate for fast processing
+        frame_skip = 5 if settings.FAST_PROCESSING else 1
+        
+        logger.info(f"[VP_PROCESS_START] Processing video: {self.video_path}")
+        logger.info(f"[VP_PROCESS_START] Frame skip rate: {frame_skip} (FAST_PROCESSING={'ON' if settings.FAST_PROCESSING else 'OFF'})")
         
         # Open video
+        logger.info(f"[VP_OPEN] Opening video file...")
         cap = cv2.VideoCapture(self.video_path)
         if not cap.isOpened():
+            logger.error(f"[VP_OPEN_FAIL] Cannot open video: {self.video_path}")
             raise Exception(f"Cannot open video: {self.video_path}")
+        
+        logger.info(f"[VP_OPEN_SUCCESS] Video file opened successfully")
         
         # Get video properties
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        duration_seconds = total_frames / fps if fps > 0 else 0
         
-        logger.info(f"Video: {total_frames} frames, {fps} FPS, {width}x{height}")
+        logger.info(f"[VP_PROPERTIES] Video: {total_frames} frames, {fps:.1f} FPS, {width}x{height}, Duration: {duration_seconds:.1f}s")
         
         # Output video setup
         output_path = f"processed/{self.video_id}_annotated.mp4"
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        logger.info(f"[VP_OUTPUT_SETUP] Output path: {output_path}")
         
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
         
         # Processing variables
         frame_count = 0
+        processed_frame_count = 0
         all_detections = []
         all_tracks = {}
         vehicle_movements = {}
         vehicle_classes_list = []
         
+        logger.info(f"[VP_PROCESSING_START] Starting frame processing... (will process ~{total_frames // frame_skip} frames)")
+        
         try:
             while True:
                 ret, frame = cap.read()
                 if not ret:
+                    logger.info(f"[VP_FRAME_END] End of video reached at frame {frame_count}")
                     break
                 
+                frame_count += 1
+                
+                # Skip frames for faster processing
+                if frame_count % frame_skip != 0:
+                    continue
+                
+                processed_frame_count += 1
+                
                 # Detect vehicles
+                logger.debug(f"[VP_FRAME_{processed_frame_count}] Processing frame {frame_count}/{total_frames}...")
                 detections = self.detector.detect_vehicles(frame)
                 
                 # Track vehicles
                 tracked_objects = self.tracker.update(detections)
+                
+                logger.debug(f"[VP_FRAME_{processed_frame_count}] Found {len(tracked_objects)} tracked objects")
                 
                 # Store data
                 all_detections.extend(tracked_objects)
@@ -379,32 +417,48 @@ class VideoProcessor:
                 
                 out.write(annotated_frame)
                 
-                frame_count += 1
-                
                 # Update progress
-                progress = int((frame_count / total_frames) * 100)
+                progress = int((processed_frame_count / (total_frames // frame_skip)) * 100)
                 if self.task:
                     self.task.update_state(state="PROGRESS", meta={"progress": progress})
                 
-                if frame_count % 100 == 0:
-                    logger.info(f"Processed {frame_count}/{total_frames} frames")
+                # Log progress every 10 processed frames
+                if processed_frame_count % 10 == 0:
+                    elapsed = time.time() - start_time
+                    rate = processed_frame_count / elapsed if elapsed > 0 else 0
+                    remaining = (total_frames // frame_skip) - processed_frame_count
+                    eta_seconds = remaining / rate if rate > 0 else 0
+                    logger.info(f"[VP_PROGRESS] {processed_frame_count}/{total_frames // frame_skip} processed ({progress}%) - {rate:.1f} fps - ETA: {eta_seconds:.0f}s")
         
         finally:
+            logger.info(f"[VP_CLEANUP] Closing video file...")
             cap.release()
             out.release()
+            logger.info(f"[VP_CLEANUP] Video file closed")
+        
+        total_time = time.time() - start_time
+        logger.info(f"[VP_FRAME_COMPLETE] Total time: {total_time:.1f}s | Processed: {processed_frame_count} frames | Rate: {processed_frame_count/total_time:.1f} fps")
         
         # Classify movements for tracks
+        logger.info(f"[VP_MOVEMENT_CLASS] Classifying movements for {len(all_tracks)} tracks...")
         for track_id, track_data in all_tracks.items():
             if len(track_data["trajectory"]) > 5:
                 movement = self.analyzer.classify_movement(track_data["trajectory"])
                 vehicle_movements[track_id] = movement
         
+        logger.info(f"[VP_MOVEMENT_CLASS] Movement classification complete")
+        
         # Calculate analytics
+        logger.info(f"[VP_ANALYTICS] Calculating analytics...")
         left_turns = sum(1 for m in vehicle_movements.values() if m == "left_turn")
         right_turns = sum(1 for m in vehicle_movements.values() if m == "right_turn")
         straight_moves = sum(1 for m in vehicle_movements.values() if m == "straight")
         
+        logger.info(f"[VP_ANALYTICS] Movements: {left_turns} left, {right_turns} right, {straight_moves} straight")
+        
         vehicle_distribution = self.analyzer.get_vehicle_class_distribution(vehicle_classes_list)
+        
+        logger.info(f"[VP_ANALYTICS] Vehicle distribution: {vehicle_distribution}")
         
         # Calculate traffic density
         avg_vehicles = len(all_detections) / max(frame_count, 1)
@@ -416,6 +470,8 @@ class VideoProcessor:
             traffic_density = "medium"
         else:
             traffic_density = "low"
+        
+        logger.info(f"[VP_ANALYTICS] Traffic density: {traffic_density} (avg {avg_vehicles:.2f} vehicles/frame)")
         
         results = {
             "total_vehicles": len(all_tracks),
@@ -434,5 +490,6 @@ class VideoProcessor:
             "processing_time": frame_count / fps if fps > 0 else 0
         }
         
-        logger.info(f"Processing complete. Results: {results}")
+        logger.info(f"[VP_RESULTS] Processing complete. Results: {results}")
+        logger.info(f"[VP_PROCESS_END] Video processing finished successfully")
         return results

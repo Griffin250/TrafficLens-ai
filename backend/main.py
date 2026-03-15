@@ -8,15 +8,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from config import get_settings
-from models import Base
-from database import engine
 from routes import videos, analytics, health
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - REAL-TIME OUTPUT
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout,
+    force=True
+)
+
+# Set to unbuffered output
+for handler in logging.root.handlers:
+    handler.flush = lambda: None
+
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
@@ -29,16 +38,7 @@ async def lifespan(app: FastAPI):
     """FastAPI lifespan context manager"""
     # Startup
     logger.info("Starting TrafficLens Backend...")
-    
-    # Create database tables (only if engine is available)
-    if engine:
-        try:
-            Base.metadata.create_all(bind=engine)
-            logger.info("Database tables created successfully")
-        except Exception as e:
-            logger.error(f"Failed to create database tables: {e}")
-    else:
-        logger.warning("Database engine not available - skipping table creation")
+    logger.info(f"Supabase URL: {settings.SUPABASE_URL}")
     
     # Create required directories
     os.makedirs(settings.UPLOAD_DIRECTORY, exist_ok=True)

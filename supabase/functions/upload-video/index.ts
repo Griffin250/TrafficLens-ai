@@ -91,6 +91,28 @@ Deno.serve(async (req) => {
       console.error("Job insert error:", jobError);
     }
 
+    // Trigger backend processing
+    const backendUrl = Deno.env.get("BACKEND_URL") || "http://localhost:8000";
+    try {
+      const processingResponse = await fetch(`${backendUrl}/api/v1/videos/process/${videoId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          video_id: videoId,
+          file_path: storagePath,
+        }),
+      });
+
+      if (!processingResponse.ok) {
+        console.warn("Failed to trigger backend processing:", processingResponse.statusText);
+      }
+    } catch (error) {
+      console.warn("Could not connect to backend for processing:", error);
+      // Continue anyway - processing can be triggered manually
+    }
+
     return new Response(
       JSON.stringify({
         id: videoId,

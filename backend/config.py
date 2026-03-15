@@ -22,16 +22,14 @@ class Settings(BaseSettings):
     PORT: int = 8000
     RELOAD: bool = True
     
-    # Database Configuration
-    DATABASE_URL: str = "postgresql://traffic_user:traffic_password@localhost:5432/trafficlens"
-    DATABASE_ECHO: bool = False
+    # Database Configuration (using Supabase - see below)
+    # DATABASE_URL: str = "postgresql://traffic_user:traffic_password@localhost:5432/trafficlens"
+    # DATABASE_ECHO: bool = False
     
-    # Redis Configuration
-    REDIS_URL: str = "redis://localhost:6379"
-    
-    # Celery Configuration
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+    # Supabase Configuration
+    SUPABASE_URL: str = "https://bfbfuuoctzfaaanknaih.supabase.co"
+    SUPABASE_KEY: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmYmZ1dW9jdHpmYWFhbmtuYWloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1NjEyMjcsImV4cCI6MjA4OTEzNzIyN30.c1WDlNCMH9LxcQYG7Ut3nKcRoj_n4V4PgiLraLmZKgU"
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
     
     # File Upload Configuration
     MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024 * 1024  # 5GB
@@ -48,6 +46,7 @@ class Settings(BaseSettings):
     TARGET_FPS: int = 30
     FRAME_SKIP: int = 1  # Process every frame
     VIDEO_CODEC: str = "mp4v"
+    FAST_PROCESSING: bool = True  # Skip frames for faster testing (5 frame skip)
     
     # CORS Configuration
     CORS_ORIGINS: list = [
