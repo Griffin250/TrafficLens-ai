@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: trafficlens-backend
+    env: python
+    region: oregon
+    plan: standard
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    rootDir: backend
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: trafficlens-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: trafficlens-redis
+          type: pserv
+          property: connectionString
+      - key: DEBUG
+        value: "false"
+      - key: SECRET_KEY
+        generateValue: true
+
+  - type: pserv
+    name: trafficlens-db
+    env: postgres
+    plan: free
+    postgresVersion: 15
+    initialSqlGitRepo: https://github.com/yourusername/trafficlens
+
+  - type: redis
+    name: trafficlens-redis
+    plan: free
+    region: oregon
