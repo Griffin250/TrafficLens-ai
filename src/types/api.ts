@@ -78,7 +78,7 @@ export interface AnalyticsSummary {
 export interface ProcessingJobResponse {
   id: string;
   video_id: string;
-  celery_task_id: string | null;
+  celery_task_id?: string | null;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
   error_message: string | null;
