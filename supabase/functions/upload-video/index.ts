@@ -91,26 +91,30 @@ Deno.serve(async (req) => {
       console.error("Job insert error:", jobError);
     }
 
-    // Trigger backend processing
-    const backendUrl = Deno.env.get("BACKEND_URL") || "http://localhost:8000";
+    // Trigger cloud processing asynchronously
+    const functionsBaseUrl = `${supabaseUrl}/functions/v1`;
     try {
-      const processingResponse = await fetch(`${backendUrl}/api/v1/videos/process/${videoId}`, {
+      const processingResponse = await fetch(`${functionsBaseUrl}/process-video`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${supabaseKey}`,
         },
         body: JSON.stringify({
-          video_id: videoId,
-          file_path: storagePath,
+          videoId,
+          filePath: storagePath,
+          originalFilename: file.name,
+          fileSize: file.size,
         }),
       });
 
       if (!processingResponse.ok) {
-        console.warn("Failed to trigger backend processing:", processingResponse.statusText);
+        const processingError = await processingResponse.text();
+        console.warn("Failed to trigger cloud processing:", processingError);
       }
     } catch (error) {
-      console.warn("Could not connect to backend for processing:", error);
-      // Continue anyway - processing can be triggered manually
+      console.warn("Could not trigger cloud processing:", error);
+      // Continue anyway - job state can be retried manually
     }
 
     return new Response(

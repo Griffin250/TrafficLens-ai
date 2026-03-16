@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS analyses_video_id_key ON public.analyses (video_id);
