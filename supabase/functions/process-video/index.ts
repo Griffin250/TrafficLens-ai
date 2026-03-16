@@ -345,7 +345,13 @@ async function analyzeVideoWithLovableAI(args: {
   const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!lovableApiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
-  const base64Video = btoa(String.fromCharCode(...args.fileBytes));
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < args.fileBytes.length; i += chunkSize) {
+    const chunk = args.fileBytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  const base64Video = btoa(binary);
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
