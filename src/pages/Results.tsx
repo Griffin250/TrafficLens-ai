@@ -94,11 +94,11 @@ export default function Results() {
           </Button>
         </motion.div>
 
-        {/* Annotated video */}
+        {/* Original uploaded video */}
         {analysis.annotated_video_path && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card overflow-hidden mb-8">
             <video
-              src={`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/processed/${analysis.annotated_video_path}`}
+              src={`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/videos/${analysis.annotated_video_path}`}
               controls
               className="w-full aspect-video bg-card"
             />
